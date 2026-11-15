@@ -24,10 +24,10 @@ const modSettings: {
 }[] = [
   {
     name: "대항해시대2 짱짱맨",
-    version: "v1.0",
+    version: "v1.1",
     config: {
       mod: "mod_jjangjjangman",
-      gameFile: "mod_jjangjjangman.zip",
+      gameFile: "mod_jjangjjangman.zip?v=1.1",
     },
   },
   {

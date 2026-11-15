@@ -29,6 +29,14 @@
 
 이 포크의 기본 커스텀 작업 대상은 짱짱맨 버전입니다. 기본판에서 시작한 이 버전의 게임 데이터는 `game/mod_jjangjjangman.zip`에서 수정합니다. 업데이트 후에도 기존 세이브를 이어 쓸 수 있도록 모드 ID `mod_jjangjjangman`을 유지합니다.
 
+v1.1에서는 기존 130개 항구에 인천항·부산항·서울항을 더했습니다. 세 곳은 처음부터 위치를 아는 보급항입니다. 서울항은 서해에서 인천항 북쪽 하구로 들어가 한강을 동쪽으로 거슬러 올라가면 나옵니다. 부산항은 한반도 남동쪽 해안에 있습니다.
+
+항구 좌표와 강 지형을 수정한 뒤 원본 한글판에서 짱짱맨 게임 파일을 다시 생성할 수 있습니다.
+
+```sh
+python3 tools/jjangjjangman/korea_ports.py game/water2.zip game/mod_jjangjjangman.zip
+```
+
 ## 모드
 
 - [교정버전 v1.08](https://cafe.naver.com/daehangs/73594)
