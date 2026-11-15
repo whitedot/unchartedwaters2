@@ -23,6 +23,14 @@ const modSettings: {
   parts?: { name: string; config: GameConfig }[];
 }[] = [
   {
+    name: "대항해시대2 짱짱맨",
+    version: "v1.0",
+    config: {
+      mod: "mod_jjangjjangman",
+      gameFile: "mod_jjangjjangman.zip",
+    },
+  },
+  {
     name: "버그/번역 교정판",
     version: "v1.08",
     config: {
