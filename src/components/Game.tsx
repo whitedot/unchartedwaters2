@@ -56,6 +56,12 @@ const KEY_ALIAS: Record<string, number> = {
   ArrowDown: 98, // Numpad2
 };
 
+function blockGameMouse(event: MouseEvent) {
+  if (event instanceof PointerEvent && event.pointerType !== "mouse") return;
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 const saveFile = "KOUKAI2.DAT";
 
 export function Game() {
@@ -360,6 +366,15 @@ export function Game() {
 
       <div
         class="game__screen"
+        onPointerDownCapture={blockGameMouse}
+        onPointerMoveCapture={blockGameMouse}
+        onPointerUpCapture={blockGameMouse}
+        onMouseDownCapture={blockGameMouse}
+        onMouseMoveCapture={blockGameMouse}
+        onMouseUpCapture={blockGameMouse}
+        onClickCapture={blockGameMouse}
+        onContextMenuCapture={blockGameMouse}
+        onWheelCapture={blockGameMouse}
         style={{
           "--screen-width": `${width}px`,
           "--screen-height": `${height}px`,
@@ -367,7 +382,7 @@ export function Game() {
         ref={screen}
       >
         <div class="game__canvas">
-          <canvas ref={canvas} onContextMenu={(event) => event.preventDefault()} />
+          <canvas ref={canvas} />
         </div>
 
         <div
