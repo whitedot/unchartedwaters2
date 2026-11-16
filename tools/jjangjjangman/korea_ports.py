@@ -28,7 +28,7 @@ def change(buf, at, old, new):
     buf[at : at + len(new)] = new
 
 
-def executable(source):
+def executable(source, profiles):
     b = bytearray(source)
     # The Korean program clears BSS through DS:C6FF. Place the extension
     # directly above it, below the downward-growing stack. Keep the original
@@ -70,9 +70,15 @@ def executable(source):
     struct.pack_into("<H", b, 6, len(kept))
     b[db + 0xC700 : db + 0xC709] = b"WALK.KEY\0"
     # Near call to the timer at offset 0x47 in town_walk.asm.
-    change(b, 0x207E5, bytes.fromhex("a0300c24013c011bc024fc050800"),
-           bytes.fromhex("a0300c83e00140c1e002") + b"\xe8"
-           + struct.pack("<h", start + 0x47 - 0x207F2) + b"\x90")
+    change(
+        b,
+        0x207E5,
+        bytes.fromhex("a0300c24013c011bc024fc050800"),
+        bytes.fromhex("a0300c83e00140c1e002")
+        + b"\xe8"
+        + struct.pack("<h", start + 0x47 - 0x207F2)
+        + b"\x90",
+    )
     for i, (name, x, y) in enumerate(PORTS, 130):
         off = db + PORT_TABLE + i * PORT_SIZE
         b[off : off + 20] = struct.pack("<HH15sB", x, y, name.encode("cp949"), 0x16)
@@ -95,6 +101,37 @@ def executable(source):
             code += b"\xa2" + word(flags if load else padding)
         return code + bytes.fromhex("07 5f 5e 59 58 9d")
 
+    # Additional native entry points run in the existing data segment.
+    runtime = Path(__file__).with_name("regular_ports.bin").read_bytes()
+    b.extend(bytes(db + 0xD400 - len(b)) + runtime)
+    b[db + 0xD300 : db + 0xD300 + 111] = profiles
+
+    def hook(site, slot, original, jump=False):
+        old = bytes.fromhex(original)
+        far = bytes([0xEA if jump else 0x9A]) + word(0xD400 + slot * 3) + word(DS)
+        change(b, site, old, far.ljust(len(old), b"\x90"))
+        count = struct.unpack_from("<H", b, 6)[0]
+        rel = site + 3 - HEADER
+        assert 0x1E + 4 * (count + 1) <= HEADER
+        struct.pack_into("<HH", b, 0x1E + 4 * count, rel % 16, rel // 16)
+        struct.pack_into("<H", b, 6, count + 1)
+
+    for site in (0xB875, 0xDA3C, 0xDA9E, 0xDB54, 0x2017B, 0x20B88):
+        hook(site, 0, "803e3a0c64")
+    hook(0xDB1B, 1, "3c647602b064")
+    for site in (0xDB99, 0xDBCC):
+        hook(site, 2, "a03a0c2ae48bf88a4394")
+    hook(0xAFA0, 3, "558bec50b025f666fe057c698be55dcb", jump=True)
+    hook(0x36AEF, 4, "b025f666ff8bf081c67c69")
+    hook(0x1C80E, 5, "83c7258b76f84683fe64")
+    hook(0x1E473, 6, "83c72583c614fe46fd807efd64")
+
+    hook(0x1C8A2, 10, "83c71483c625ff46f8837ef864")
+    hook(0x2EDCC, 11, "83c71483c625ff46fc837efc64")
+    hook(0x2ECDF, 12, "83c71483c625fe46ff")
+    change(b, 0x2ECD2, bytes([99]), bytes([102]))
+    change(b, 0x2ECEB, bytes([100]), bytes([103]))
+
     # Each stub replays the displaced instructions before returning.
     # The load hook replaces a TEST, so its condition flags must reach the caller.
     for site, addr, load, original in (
@@ -103,7 +140,11 @@ def executable(source):
         (0x1BB53, 0xC7B0, False, "b86c8b2d300c"),
     ):
         original = bytes.fromhex(original)
-        routine = synchronize(load) + original + b"\xcb"
+        routine = synchronize(load)
+        target = 0xD400 + 3 * {0xC710: 7, 0xC760: 8, 0xC7B0: 9}[addr]
+        routine += b"\xe8" + struct.pack("<h", target - (addr + len(routine) + 3))
+        routine += original + b"\xcb"
+        assert len(routine) <= 0x50
         b[db + addr : db + addr + len(routine)] = routine
         change(
             b,
@@ -126,7 +167,7 @@ def asia_terrain(data):
     offsets = struct.unpack_from("<1350H", data)
     edits = {}
     for x, y, tile in [(x, y, 0) for x, y in RIVER] + [
-        (x, y, 0x12) for _, x, y in PORTS
+        (x, y, 0x10) for _, x, y in PORTS
     ]:
         col, row = (x - 720) // 2, y // 2
         edits.setdefault(row // 12 * 30 + col // 12, {})[
@@ -226,6 +267,169 @@ def world_map(source):
     return result
 
 
+def archive_entry(source, i):
+    n, size, offset = struct.unpack_from(">III", source, 272 + 12 * i)
+    return decode(source[offset : offset + n], source[16:272], size)
+
+
+def town_assets(source, entrances):
+    """Keep the original archive payload; append three independent town maps."""
+    reference = (0, 2, 1)  # Lisbon, Istanbul, Seville
+    towns = {i: archive_entry(source, i) for i in (94, 95, 97)}
+    extra = []
+    coords = bytearray(entrances + entrances[-24:] * 29)
+    for city, ref in enumerate(reference):
+        record = bytearray(entrances[24 * ref : 24 * (ref + 1)])
+        town = bytearray([4]) * 9216
+
+        def stamp(donor, sx, sy, x, y, width, height):
+            assert 0 <= x <= 96 - width and 0 <= y <= 96 - height
+            for dy in range(height):
+                a = (sy + dy) * 96 + sx
+                b = (y + dy) * 96 + x
+                town[b : b + width] = towns[donor][a : a + width]
+
+        # Quays follow the estuary, eastern strait, and Han river respectively.
+        for y in range(96):
+            for x in range(96):
+                edge = (
+                    73 + min(7, abs(x - 23) // 4) + (4 if 47 <= x <= 61 else 0),
+                    75 + min(10, abs(y - 28) // 3) + (3 if 46 <= y <= 57 else 0),
+                    75 + min(5, abs(x - 69) // 8) + (4 if 35 <= x <= 50 else 0),
+                )[city]
+                depth = (x if city == 1 else y) - edge
+                if depth >= -5:
+                    town[96 * y + x] = (
+                        0x3A
+                        if depth >= 1
+                        else (0x3C if city == 1 else 0x31) if depth == 0 else 0x0D
+                    )
+                elif x < 5 or y < 3 or x >= 92 or y >= 91:
+                    town[96 * y + x] = 0x06
+        # Wide avenues connect the waterfront squares to the northern compound.
+        for f in (0, 1, 2, 3, 4, 6, 8, 9):
+            x, y = record[f * 2 : f * 2 + 2]
+            for yy in range(y + 2, y + 5):
+                for xx in range(min(x, 48) - 2, max(x, 48) + 4):
+                    town[yy * 96 + xx] = 0x0D
+        for yy in range(19, 74):
+            town[yy * 96 + 46 : yy * 96 + 52] = bytes([0x0D]) * 6
+
+        # A complete East Asian walled compound and ornamental groves.
+        px, py = record[10:12]
+        stamp(97, 33, 0, px - 14, max(0, py - 14), 32, 19)
+
+        # Grass courtyards with clipped corners, trees, and residential lanes.
+        def garden(x, y, w, h):
+            for j in range(h):
+                for i in range(w):
+                    edge = (j in (0, h - 1), i in (0, w - 1))
+                    tile = 0x06
+                    if edge == (True, True):
+                        tile = ((0x09, 0x07), (0x00, 0x02))[j == h - 1][i == w - 1]
+                    elif edge[0]:
+                        tile = 0x08 if j == 0 else 0x01
+                    elif edge[1]:
+                        tile = 0x05 if i == 0 else 0x03
+                    elif j % 3 == 1 and i % 4 == 2:
+                        tile = 0x52
+                    town[(y + j) * 96 + x + i] = tile
+
+        for box in (
+            ((9, 26, 17, 9), (51, 44, 12, 9), (60, 60, 10, 7), (29, 72, 12, 4)),
+            ((8, 31, 17, 8), (49, 28, 16, 9), (64, 52, 7, 8), (28, 70, 11, 6)),
+            ((8, 25, 21, 8), (58, 24, 15, 10), (49, 62, 12, 8), (22, 66, 10, 6)),
+        )[city]:
+            garden(*box)
+        # A local temple marks the original cathedral square. The royal court
+        # and temple are scenery and do not dispatch European story scripts.
+        tx, ty = record[20:22]
+        stamp(94, 31, 32, tx - 5, ty - 6, 12, 8)
+        for x, y in (
+            ((16, 14), (69, 25), (69, 57), (19, 68)),
+            ((50, 13), (18, 38), (36, 57), (48, 77)),
+            ((15, 14), (68, 13), (49, 34), (49, 72)),
+        )[city]:
+            # Small blue-tiled row houses, without shop signs/entrances.
+            for dy, row in enumerate(
+                (
+                    (0x49,) * 6,
+                    (0x54,) * 6,
+                    (0x5D,) * 6,
+                    (0x67, 0x68, 0x60, 0x68, 0x60, 0x61),
+                    (0x26, 0x2C, 0x27, 0x2D, 0x27, 0x2F),
+                )
+            ):
+                pos = (y + dy) * 96 + x
+                town[pos : pos + 6] = bytes(row)
+
+        # Native facades include the doorway's two collision tiles. Guild and
+        # fortune teller share a building in Changan; use separate Macao shops.
+        for f in range(12):
+            x, y = record[f * 2 : f * 2 + 2]
+            if f in (5, 7, 10) or x == 255:
+                record[2 * f : 2 * f + 2] = b"\xff\xff"
+                continue
+            donor = 95 if f in (6, 11) else 97
+            sx, sy = entrances[donor * 24 + 2 * f : donor * 24 + 2 * f + 2]
+            row = towns[donor][(sy + 1) * 96 : (sy + 2) * 96]
+            left = row.rindex(0x26, 0, sx + 1)
+            right = row.index(0x2F, sx)
+            roof = next(
+                h
+                for h in range(3, 7)
+                if towns[donor][(sy - h) * 96 + sx] in (0x48, 0x49)
+            )
+            stamp(
+                donor,
+                left,
+                sy - roof,
+                x + left - sx,
+                y - roof,
+                right - left + 1,
+                roof + 2,
+            )
+
+        # Verify the native two-tile foot test from the dock to every doorway.
+        from collections import deque
+
+        doors = list(zip(record[::2], record[1::2]))
+        x, y = doors[3]
+        queue = deque([(x, y + 1)])
+        seen = set(queue)
+        while queue:
+            x, y = queue.popleft()
+            for a, b in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if not (0 <= a < 94 and 0 <= b < 94) or (a, b) in seen:
+                    continue
+                l, r = town[(b + 1) * 96 + a : (b + 1) * 96 + a + 2]
+                if l < 0x2A and (r < 0x25 or 0x2A <= r < 0x30):
+                    seen.add((a, b))
+                    queue.append((a, b))
+        assert all(p in seen or p == (255, 255) for p in doors), (
+            city,
+            doors,
+            seen & set(doors),
+        )
+        coords.extend(record)
+        extra.append(town)
+
+    shift = 32 * 12
+    head = bytearray(source[:272])
+    for i in range(130):
+        c, n, o = struct.unpack_from(">III", source, 272 + 12 * min(i, 100))
+        head.extend(struct.pack(">III", c, n, o + shift))
+    payload = bytearray(source[272 + 101 * 12 + 4 :])
+    for town in extra:
+        packed = encode(town, source[16:272])
+        offset = 272 + 133 * 12 + 4 + len(payload)
+        head.extend(struct.pack(">III", len(packed), 9216, offset))
+        payload.extend(packed)
+    result = head + bytes(4) + payload
+    assert all(archive_entry(result, 130 + i) == town for i, town in enumerate(extra))
+    return result, coords
+
+
 def build(src, dest):
     if src.resolve() == dest.resolve():
         raise ValueError("Use a separate output file")
@@ -235,6 +439,18 @@ def build(src, dest):
         with ZipFile(src) as base, ZipFile(tmp.name, "w", ZIP_DEFLATED) as out:
             if not PATCHES.keys() <= set(base.namelist()):
                 raise ValueError("Required DOS files missing")
+            start = archive_entry(base.read("DATA1.LZW"), 15)
+            for i in range(120):
+                pos = ORIGINAL_TABLE - 0xC30 + 20 * i
+                if i != 53:
+                    assert 0 in start[pos + 4 : pos + 18] and start[pos + 18] == 0
+            pos = 0x697C - 0xC30
+            profiles = b"".join(
+                start[pos + i * 37 : pos + (i + 1) * 37] for i in (94, 95, 97)
+            )
+            maps, coords = town_assets(
+                base.read("PORTMAP.LZW"), base.read("ZA_DAT.DAT")
+            )
             for member in base.infolist():
                 data = base.read(member)
                 if member.filename in PATCHES:
@@ -243,7 +459,14 @@ def build(src, dest):
                         raise ValueError(
                             f"Unexpected input version of {member.filename}"
                         )
-                    data = patch(data)
+                    if member.filename == "MAIN.EXE":
+                        data = patch(data, profiles)
+                    elif member.filename == "PORTMAP.LZW":
+                        data = maps
+                    elif member.filename == "ZA_DAT.DAT":
+                        data = coords
+                    else:
+                        data = patch(data)
                 out.writestr(member, data)
         Path(tmp.name).chmod(0o644)
         Path(tmp.name).replace(dest)
@@ -252,6 +475,14 @@ def build(src, dest):
 
 
 PATCHES = {
+    "PORTMAP.LZW": (
+        "ed3161c45b038fbc715840e9798bc4a2d3c5615d036b27c8048e93c8c6b7c25d",
+        None,
+    ),
+    "ZA_DAT.DAT": (
+        "6760ebc1cdb7356b3f6a66c67fed1a3e29eb3e357a9958ff698b4598774ad92a",
+        None,
+    ),
     "MAIN.EXE": (
         "1718bbbbcdd938dfe44403d9bd5254dfc02d431217dea39ae5fb3fcde1597747",
         executable,
