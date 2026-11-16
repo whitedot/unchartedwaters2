@@ -1,10 +1,12 @@
 import { defineConfig } from "vite";
+import { localSave } from "./server/local-save";
 import preact from "@preact/preset-vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 
 export default defineConfig({
   plugins: [
     preact(),
+    localSave(),
     viteStaticCopy({
       targets: [
         {
@@ -38,7 +40,7 @@ export default defineConfig({
               .replace("pcspeaker=true", "pcspeaker=false"),
         },
         {
-          src: "game/*",
+          src: "game/mod_jjangjjangman.zip",
           dest: "static/game",
         },
       ],

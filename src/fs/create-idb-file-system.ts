@@ -1,57 +1,14 @@
-export interface IdbFileSystem {
-  delete(key: string): Promise<void>;
-  save(key: string, data: Uint8Array): Promise<void>;
-  load(key: string): Promise<Uint8Array | null>;
-}
-
-export async function createIdbFileSystem(
-  name: string,
-  version?: number,
-): Promise<IdbFileSystem> {
-  const db = await new Promise<IDBDatabase>((resolve) => {
-    const idb = window.indexedDB.open(name, version);
-    idb.onupgradeneeded = function () {
-      this.result.createObjectStore("files");
-    };
-    idb.onsuccess = function () {
-      resolve(this.result);
+// Read the old browser save once when the server has no save yet.
+export function readLegacySave(name: string, key: string): Promise<Uint8Array | null> {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open(name, 1);
+    open.onerror = () => reject(new Error("기존 브라우저 세이브를 열 수 없습니다."));
+    open.onupgradeneeded = () => open.result.createObjectStore("files");
+    open.onsuccess = () => {
+      const db = open.result;
+      const request = db.transaction("files").objectStore("files").get(key);
+      request.onsuccess = () => { db.close(); resolve(request.result ?? null); };
+      request.onerror = () => { db.close(); reject(new Error("기존 세이브를 읽을 수 없습니다.")); };
     };
   });
-
-  return {
-    delete(key: string): Promise<void> {
-      return new Promise<void>((resolve) => {
-        const request = db
-          .transaction("files", "readwrite")
-          .objectStore("files")
-          .delete(key);
-        request.onsuccess = function () {
-          resolve();
-        };
-      });
-    },
-    save(key: string, data: Uint8Array): Promise<void> {
-      return new Promise<void>((resolve) => {
-        const request = db
-          .transaction("files", "readwrite")
-          .objectStore("files")
-          .put(data, key);
-        request.onsuccess = function () {
-          resolve();
-        };
-      });
-    },
-    load(key: string): Promise<Uint8Array | null> {
-      return new Promise((resolve) => {
-        const request = db
-          .transaction("files", "readonly")
-          .objectStore("files")
-          .get(key);
-        request.onsuccess = function (ev) {
-          console.log(ev);
-          resolve((ev.target as IDBRequest<Uint8Array>).result ?? null);
-        };
-      });
-    },
-  };
 }

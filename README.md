@@ -16,12 +16,12 @@
 ## 사용법
 
 - 공통
-  - 게임내 저장파일은 브라우저 자체(IndexedDB)에 저장됩니다. 브라우저를 종료해도 저장파일이 계속 남아있습니다.
+  - 웹 인증 후 게임에서 저장하면 서버에 기록됩니다. 같은 계정으로 다른 기기에서 이어 할 수 있습니다. 서버에 세이브가 없을 때 기존 브라우저의 짱짱맨 저장 파일을 한 번 가져옵니다.
 - 마우스는 게임 화면에서 직접 사용할 수 있습니다. 도구 모음의 키보드 버튼으로 터치 조이스틱과 가상 키패드를 켜거나 끌 수 있습니다.
 - 데스크탑 + 풀키보드 배열을 사용하는 경우
   - 오리지날 키매핑으로 게임 진행이 가능합니다.
 - 데스크탑 + 텐키리스 배열을 사용하는 경우
-  - 항해시 방향키를 사용할 수 있습니다.
+  - 가로와 세로 방향키를 함께 누르면 대각선으로 항해합니다. 한쪽 키를 떼면 남은 방향으로 전환합니다.
   - `Q`, `W`, `E`, `R` 키를 이용하여 메뉴를 활성화 할 수 있습니다.
 - 모바일의 경우
   - 가상 키패드를 활용해서 게임을 진행할 수 있습니다.
@@ -38,19 +38,14 @@ v1.1에서는 기존 130개 항구에 인천항·부산항·서울항을 더했�
 python3 tools/jjangjjangman/korea_ports.py game/water2.zip game/mod_jjangjjangman.zip
 ```
 
-## 모드
-
-- [교정버전 v1.08](https://cafe.naver.com/daehangs/73594)
-- [에르네스트 모드 v1.11](https://cafe.naver.com/daehangs/71466)
-- [정화편(기본판) v3.0](https://cafe.naver.com/daehangs/52187)
-- [밀란다 / 살바도르편 20216.11.26](https://cafe.naver.com/daehangs/66350)
-
 ## 실행
+
+로컬에서는 PHP CLI와 Node.js를 설치한 뒤 `npm install`, `npm run dev`로 실행합니다. 개발 서버는 세이브를 `.game/saves/`에 보관합니다. 운영 사이트는 Nginx 웹 인증을 거쳐 PHP-FPM이 `/var/lib/water2/saves/`에 저장합니다.
 
 **윈도우 익스플로러**는 지원하지 않습니다. 반드시 [크롬](https://www.google.com/chrome/)이나, [파이어폭스](https://www.mozilla.org/ko/firefox/new/),
 또는, 모바일 브라우저에서 실행해주시기 바랍니다.
 
-**[게임 시작하기](https://water2.dist.be)**
+**[게임 시작하기](https://water2.saanraan.com)**
 
 ## 문의하기
 
