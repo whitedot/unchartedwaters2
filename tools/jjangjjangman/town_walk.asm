@@ -36,20 +36,22 @@ mov ah,0x3e
 int 0x21
 done:
 jmp continue_input
-times 0x48-($-$$) db 0x90
+times 0x47-($-$$) db 0x90
 timer:
-; Original timer is 8 or 4 ticks (graphics delay on or off).
-; Use 4 or 2 for movement and the original period for idle turns.
-mov al,[0xc30]
-and ax,1
-inc ax
-shl ax,1
+; AX holds the original 4- or 8-tick period. Carry the division remainder
+; between moving turns so three steps take exactly two original periods.
 cmp byte [bp-1],0
-je idle
+je timer_done
 test di,di
-jnz timer_done
-idle:
+jz timer_done
+push cx
 shl ax,1
+add al,[0xc70a]
+mov cl,3
+div cl
+mov [0xc70a],ah
+xor ah,ah
+pop cx
 timer_done:
 ret
 times 0x64-($-$$) db 0x90

@@ -69,9 +69,10 @@ def executable(source):
     b[0x1E : 0x1E + 4 * count] = b"".join(kept) + bytes(24)
     struct.pack_into("<H", b, 6, len(kept))
     b[db + 0xC700 : db + 0xC709] = b"WALK.KEY\0"
-    # Near call to the timer at offset 0x48 in town_walk.asm.
+    # Near call to the timer at offset 0x47 in town_walk.asm.
     change(b, 0x207E5, bytes.fromhex("a0300c24013c011bc024fc050800"),
-           b"\xe8" + struct.pack("<h", start + 0x48 - 0x207E8) + b"\x90" * 11)
+           bytes.fromhex("a0300c83e00140c1e002") + b"\xe8"
+           + struct.pack("<h", start + 0x47 - 0x207F2) + b"\x90")
     for i, (name, x, y) in enumerate(PORTS, 130):
         off = db + PORT_TABLE + i * PORT_SIZE
         b[off : off + 20] = struct.pack("<HH15sB", x, y, name.encode("cp949"), 0x16)
