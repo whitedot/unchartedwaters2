@@ -9,6 +9,7 @@ from unicorn import Uc, UC_ARCH_X86, UC_MODE_16
 from unicorn.x86_const import (
     UC_X86_REG_AX,
     UC_X86_REG_DX,
+    UC_X86_REG_BX,
     UC_X86_REG_CS,
     UC_X86_REG_DS,
     UC_X86_REG_SS,
@@ -45,8 +46,8 @@ class VoyageMemory(unittest.TestCase):
             cpu.reg_write(UC_X86_REG_CS, cs)
             cpu.reg_write(UC_X86_REG_AX, ax)
             cpu.reg_write(UC_X86_REG_DX, dx)
-            cpu.reg_write(UC_X86_REG_SP, 0xFD80)
-            cpu.mem_write(ds * 16 + 0xFD80, struct.pack("<HH", 0, 0x9000))
+            cpu.reg_write(UC_X86_REG_SP, 0xFC80)
+            cpu.mem_write(ds * 16 + 0xFC80, struct.pack("<HH", 0, 0x9000))
             cpu.emu_start(cs * 16 + off, 0x90000, count=5000)
             self.assertEqual(
                 (cpu.reg_read(UC_X86_REG_CS), cpu.reg_read(UC_X86_REG_IP)), (0x9000, 0)
@@ -56,10 +57,25 @@ class VoyageMemory(unittest.TestCase):
         native_hook(0x1BEDB)  # new game
         econ = native_hook(0xAFA0, 130)
         port = native_hook(0xAF90, 130)
+        for city, specialty in ((0, 47), (2, 46)):
+            self.assertEqual(
+                cpu.mem_read(ds * 16 + econ + city * 37 + 26, 1), bytes([specialty])
+            )
+        template = native_hook(0xAF70, 65)
+        self.assertEqual(cpu.mem_read(ds * 16 + template, 6), "거북선".encode("cp949"))
+        stats = native_hook(0xAF80, 25)
+        self.assertEqual(cpu.mem_read(ds * 16 + stats + 1, 3), bytes([100] * 3))
+        self.assertEqual(
+            struct.unpack("<H", cpu.mem_read(ds * 16 + stats + 6, 2))[0], 3000
+        )
+        cpu.reg_write(UC_X86_REG_BX, 0x5210)
+        for figure in (1, 9, 10, 11):
+            cpu.mem_write(ds * 16 + 0x5210 + 29, bytes([figure]))
+            self.assertEqual(native_hook(0x1E8BA), min(figure, 10))
         values = bytes(range(111))
         cpu.mem_write(ds * 16 + econ, values)
         # The game may consume this entire native stack area for route queues.
-        cpu.mem_write(ds * 16 + 0xC700, bytes([0xA5]) * (0xFD80 - 0xC700))
+        cpu.mem_write(ds * 16 + 0xC700, bytes([0xA5]) * (0xFC80 - 0xC700))
         for i, (x, y) in enumerate(((934, 378), (952, 386), (944, 374))):
             self.assertEqual(native_hook(0x277F2, x, y), 130 + i)
             self.assertEqual(native_hook(0xAF90, 130 + i), port + 20 * i)

@@ -2,7 +2,7 @@
 bits 16
 org 0
 %define econ 0xfe40
-%define defaults 0x500
+%define defaults 0x800
 %define extra 0xfe00
 %define ports (extra-130*20)
 %define padding (0x5f54+18)
@@ -31,6 +31,20 @@ jmp near boot
 jmp near new_hook
 jmp near load_hook
 jmp near save_hook
+jmp near ship_record
+jmp near ship_stats
+jmp near yard_list
+jmp near yard_first
+jmp near ship_art
+jmp near figure_list
+jmp near figure_effect
+jmp near final_hull
+jmp near preview_hull
+jmp near location_marker
+jmp near sell_index
+jmp near yard_hull
+jmp near figure_price
+jmp near figure_row
 
 regular:
  push ax
@@ -120,6 +134,10 @@ restore:
  popf
  ret
 init_ports:
+ mov si,0x900
+ mov di,0xfd00
+ mov cx,256
+ cs rep movsb
  mov si,defaults+111
  mov di,extra
  mov cx,60
@@ -170,6 +188,17 @@ load_game:
  add si,19
  add di,19
  loop .flags
+ cmp byte [padding+120*20],5
+ je restore
+ ; Refresh fixed specialty definitions for saves written by v1.4.
+ mov si,defaults+24
+ mov di,econ+24
+ cs movsw
+ cs movsw
+ add si,70
+ add di,70
+ cs movsw
+ cs movsw
  jmp restore
 .legacy:
  cmp byte [0xc3a],130
@@ -180,6 +209,7 @@ load_game:
  jmp new_game.init
 save_game:
  preserve
+ mov byte [padding+120*20],5
  mov si,extra+19
  mov di,padding
  mov cx,3
@@ -321,12 +351,12 @@ locate:
  retf
 
 ; The C runtime has already based the DOS arenas on the original SP.
-; Before main, reserve the top 0x100 bytes for the three mutable records,
-; their economies and WALK.KEY. The native stack only grows below FE00.
+; Keep the catalog at FD00 and the port records and WALK.KEY at FE00
+; above the downward-growing native stack.
 boot:
  pop ax
  pop dx
- mov sp,extra
+ mov sp,0xfd00
  push ss
  pop ds
  push word [0xbd5b]
@@ -346,3 +376,119 @@ save_hook:
  mov ax,0x8b6c
  sub ax,0x0c30
  retf
+
+; Model 25 and its template (instance 40+25) are independent of all
+; stock models, and cargo and equipment IDs survive in native save slots.
+ship_record:
+ cmp al,65
+ jne .stock
+ mov ax,0xfd78
+ retf
+.stock: mov ah,25
+ mul ah
+ add ax,0x57ce
+ retf
+ship_stats:
+ cmp al,25
+ jne .stock
+ mov ax,0xfd91
+ retf
+.stock: mov ah,12
+ mul ah
+ add ax,0x5e28
+ retf
+yard_list:
+ shl si,cl
+ add si,0xb752
+ cmp byte [0xc3a],131
+ jne .done
+ mov si,0xfd9d
+.done: retf
+yard_first:
+ shl bx,cl
+ mov al,[bx+0xb752]
+ cmp byte [0xc3a],131
+ jne .done
+ mov al,25
+.done: retf
+ship_art:
+ shl ax,cl
+ cmp bx,25
+ jne .stock
+ mov bx,65
+ retf
+.stock: add bx,28
+ retf
+figure_list:
+ mov [bp-8],ax
+ xor si,si
+ cmp byte [0xc3a],131
+ jne .done
+ ; Keep the native selection, append the new fitting at Busan.
+ mov bx,[bp-10]
+ mov [0xfde8],bx
+ inc word [bp-10]
+.done: retf
+figure_effect:
+ mov al,[bx+0x1d]
+ xor ah,ah
+ cmp al,11
+ jne .done
+ dec ax
+.done: retf
+final_hull:
+ mov bx,[bp-0xc]
+ cmp byte [bp-3],25
+ jne .done
+ mov al,100
+.done: mov [bx+3],al
+ retf
+preview_hull:
+ idiv cx
+ cmp byte [bp-8],25
+ jne .done
+ mov ax,100
+.done: mov dx,100
+ retf
+location_marker:
+ mov al,[0xc3a]
+ cmp al,131
+ jne .native
+ mov al,125 ; unused supply-port mooring tag
+.native: or al,128
+ retf
+sell_index:
+ mov bl,[bp-2]
+ xor bh,bh
+ cmp bl,46
+ jb .done
+ ; Use regional prices for ginger and fish as the price references.
+ mov bl,5
+ cmp byte [bp-2],46
+ je .done
+ mov bl,12
+.done: retf
+yard_hull:
+ idiv cx
+ cmp byte [bp-0xe],25
+ jne .store
+ mov ax,100
+.store: mov [bp-1],al
+ retf
+figure_price:
+ mov [bp-1],cl
+ xor ch,ch
+ cmp cl,11
+ jne .done
+ dec cx ; same fitting price as the Goddess
+.done: mov ax,cx
+ retf
+figure_row:
+ lea ax,[si+1]
+ mov bx,si
+ cmp byte [0xc3a],131
+ jne .done
+ cmp si,[0xfde8]
+ jne .done
+ mov ax,11
+.done: retf

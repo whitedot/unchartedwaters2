@@ -27,16 +27,67 @@ def change(buf, at, old, new):
     buf[at : at + len(new)] = new
 
 
-def executable(source, profiles):
+def shipyard_catalog(exe, start, description_id):
+    data = exe[HEADER + 16 * DS :]
+    block = bytearray(256)
+    block[:92] = data[0x764:0x7C0]
+    struct.pack_into("<HH", block, 92, 0xFDED, 0xFDF2)
+    block[0x60:0x76] = data[0x8C4:0x8DA]
+    struct.pack_into("<H", block, 0x76, 0xFDF7)
+    template = 0x57CE - 0xC30 + (40 + 22) * 25
+    block[0x78:0x91] = start[template : template + 25]
+    block[0x78:0x8A] = "거북선".encode("cp949").ljust(18, b"\0")
+    block[0x8A] = 25
+    block[0x91:0x9D] = struct.pack(
+        "<6BH2BH", 0, 100, 100, 100, 45, 45, 3000, 150, 2, 14000
+    )
+    block[0x9D:0xA5] = bytes([25, 17] + [255] * 6)
+    block[0xAA:0xDC] = data[0xB7AA:0xB7DC]
+    struct.pack_into("<H", block, 0xDC, description_id)
+    for offset, name in ((0xED, "홍삼"), (0xF2, "꽃게"), (0xF7, "용두")):
+        block[offset : offset + 4] = name.encode("cp949")
+    return block
+
+
+def append_description(source):
+    first = struct.unpack_from(">H", source)[0]
+    offsets = struct.unpack_from(f">{first//2}H", source)
+    line = (
+        "조선의 거북선입니다. 돌격을 위한 튼튼한 선체에 용머리를 달았습니다.".encode(
+            "cp949"
+        )
+        + b"\0"
+    )
+    return (
+        b"".join(struct.pack(">H", v + 2) for v in (*offsets, len(source)))
+        + source[first:]
+        + line
+    )
+
+
+def append_ship_picture(source):
+    first = struct.unpack_from(">I", source)[0]
+    assert first == 65 * 4
+    offsets = struct.unpack_from(">65I", source)
+    art = Path(__file__).with_name("art")
+    return (
+        b"".join(struct.pack(">I", v + 4) for v in (*offsets, len(source)))
+        + source[first:]
+        + (art / "geobukseon.graph").read_bytes()
+    )
+
+
+def executable(source, profiles, catalog):
     b = bytearray(source)
     runtime = Path(__file__).with_name("regular_ports.bin").read_bytes()
-    assert len(runtime) <= 0x500
+    assert len(runtime) <= 0x800
     # Give the extension its own DOS load segment BEFORE the native image.
     # Native near pointers and offsets stay unchanged (including SS == DS).
     towns = b"".join(
         struct.pack("<HH15sB", x, y, name.encode("cp949"), 0x16) for name, x, y in PORTS
     )
-    prefix = runtime.ljust(0x500, b"\0") + profiles + towns + b"WALK.KEY\0\0\0"
+    prefix = runtime.ljust(0x800, b"\0") + profiles + towns + b"WALK.KEY\0\0\0"
+    prefix = prefix.ljust(0x900, b"\0") + catalog
     prefix += bytes(-len(prefix) % 16)
     delta = len(prefix) // 16
     relocated = []
@@ -101,6 +152,54 @@ def executable(source, profiles):
     hook(0x2ECDF, 12, "83c71483c625fe46ff")
     change(b, 0x2ECD2, bytes([99]), bytes([102]))
     change(b, 0x2ECEB, bytes([100]), bytes([103]))
+
+    # Expanded native catalog tables are copied into the reserved page on load.
+    hook(0xAF70, 25, "558bec50b019f666fe05ce578be55dcb", jump=True)
+    hook(0xAF80, 26, "558bec50b00cf666fe05285e8be55dcb", jump=True)
+    hook(0x19664, 25, "b81900f76efe")  # ship name in selection lists
+    change(b, 0x1966C, bytes.fromhex("81c3ce57"), b"\x90" * 4)
+    hook(0x2FD23, 36, "f7f98846ff")  # shipyard specification card
+    hook(0x308CF, 27, "d3e681c652b7")
+    hook(0x30AC1, 28, "d3e38a8752b7")
+    hook(0xD2F6, 29, "d3e08d5f1c")
+    hook(0x30E57, 30, "8946f82bf6")
+    hook(0x1E8BA, 31, "8a471d2ae4")
+    hook(0x30A27, 32, "8b5ef4884703")
+    hook(0x30890, 33, "f7f9ba6400")
+    for site in (0x30453, 0x30A30):
+        hook(site, 34, "a03a0c0c80")
+    hook(0x29A21, 35, "8a5efe2aff")
+    hook(0x30E92, 37, "884eff2aed8bc1")
+    hook(0x30E5E, 38, "8d44018bde")
+    change(b, 0x2FE65, b"\x0b", b"\x0c")
+    change(b, 0x199EB, word(0x8C4), word(0xFD60))
+    for site in (0x30943, 0x30C07):
+        change(b, site, word(0xB7AA), word(0xFDAA))
+    for site in (
+        0xB930,
+        0x196EA,
+        0x21BA8,
+        0x21D7E,
+        0x21DDA,
+        0x21DF1,
+        0x23292,
+        0x2436C,
+        0x2456E,
+        0x29587,
+        0x29682,
+        0x29716,
+        0x297AD,
+        0x298E5,
+        0x29AA1,
+        0x29F9A,
+        0x2A7A9,
+        0x2A8AB,
+        0x2BBA4,
+        0x2BE82,
+        0x2BEE2,
+    ):
+        change(b, site, word(0x764), word(0xFD00))
+    change(b, HEADER + 16 * DS + 0x7C9, bytes([46]), bytes([48]))
 
     # Relocation locations and the original startup segments move with the
     # native image. The extension targets above remain relative to segment 0.
@@ -392,7 +491,7 @@ def build(src, dest):
             if not PATCHES.keys() <= set(base.namelist()):
                 raise ValueError("Required DOS files missing")
             start = archive_entry(base.read("DATA1.LZW"), 15)
-            for i in range(120):
+            for i in range(121):
                 pos = ORIGINAL_TABLE - 0xC30 + 20 * i
                 if i != 53:
                     assert 0 in start[pos + 4 : pos + 18] and start[pos + 18] == 0
@@ -400,11 +499,31 @@ def build(src, dest):
             profiles = b"".join(
                 start[pos + i * 37 : pos + (i + 1) * 37] for i in (94, 95, 97)
             )
+            profiles = bytearray(profiles)
+            for city, good, price in ((0, 47, 12), (2, 46, 32)):
+                struct.pack_into("<HBB", profiles, city * 37 + 24, price, good, 0)
+            catalog = shipyard_catalog(
+                base.read("MAIN.EXE"),
+                start,
+                struct.unpack(">H", base.read("MESSAGE.DAT")[:2])[0] // 2,
+            )
             maps, coords = town_assets(
                 base.read("PORTMAP.LZW"), base.read("ZA_DAT.DAT")
             )
             for member in base.infolist():
                 data = base.read(member)
+                if member.filename == "MESSAGE.DAT":
+                    data = append_description(data)
+                elif member.filename == "GRAPH.DAT":
+                    data = append_ship_picture(data)
+                elif member.filename == "TRANSIT.DAT":
+                    assert len(data) == 0x1980 + 11 * 0x480
+                    data += (
+                        Path(__file__)
+                        .with_name("art")
+                        .joinpath("yongdu.transit")
+                        .read_bytes()
+                    )
                 if member.filename in PATCHES:
                     expected, patch = PATCHES[member.filename]
                     if hashlib.sha256(data).hexdigest() != expected:
@@ -412,7 +531,7 @@ def build(src, dest):
                             f"Unexpected input version of {member.filename}"
                         )
                     if member.filename == "MAIN.EXE":
-                        data = patch(data, profiles)
+                        data = patch(data, profiles, catalog)
                     elif member.filename == "PORTMAP.LZW":
                         data = maps
                     elif member.filename == "ZA_DAT.DAT":
