@@ -89,7 +89,9 @@ export function Game({
 
   const [enabledToggleFns, setEnabledToggleFns] = useState(false);
   const [enabledToggleFullscreen, setEnabledToggleFullscreen] = useState(false);
-  const [enabledToggleKeyboard, setEnabledToggleKeyboard] = useState(true);
+  const [enabledToggleKeyboard, setEnabledToggleKeyboard] = useState(
+    () => !window.matchMedia("(pointer: fine)").matches,
+  );
 
   const screen = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -474,6 +476,8 @@ export function Game({
             <button
               type="button"
               class={`game__header__item ${enabledToggleKeyboard ? "" : "game__header__item--disabled"}`}
+              title="터치 조이스틱·가상 키패드"
+              aria-pressed={enabledToggleKeyboard}
               onClick={toggleKeyboard}
             >
               <svg version="1.1" viewBox="0 0 128 128">
@@ -617,11 +621,12 @@ export function Game({
         ref={screen}
       >
         <div class="game__canvas">
-          <canvas ref={canvas} />
+          <canvas ref={canvas} onContextMenu={(event) => event.preventDefault()} />
         </div>
 
         <div
           class="game__event-blocker"
+          hidden={!enabledToggleKeyboard}
           ref={mobileController}
           onTouchStart={ignoreStopAndPrevent}
           onTouchEnd={ignoreStopAndPrevent}
