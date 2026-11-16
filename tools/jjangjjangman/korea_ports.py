@@ -46,7 +46,18 @@ def shipyard_catalog(exe, start, description_id):
     struct.pack_into("<H", block, 0xDC, description_id)
     for offset, name in ((0xED, "홍삼"), (0xF2, "꽃게"), (0xF7, "용두")):
         block[offset : offset + 4] = name.encode("cp949")
-    return block
+    # Nine entries per table, including the unequipped (0) and Busan (8) rows.
+    guns = bytearray()
+    for table, value in (
+        (0x808, 0xFC90 + 90),
+        (0x818, 25),
+        (0x828, 5),
+        (0x838, 25),
+        (0x848, 1000),
+    ):
+        guns.extend(data[table : table + 16] + word(value))
+    guns.extend("천자총통".encode("cp949") + b"\0")
+    return block + guns
 
 
 def append_description(source):
@@ -200,6 +211,39 @@ def executable(source, profiles, catalog):
     ):
         change(b, site, word(0x764), word(0xFD00))
     change(b, HEADER + 16 * DS + 0x7C9, bytes([46]), bytes([48]))
+
+    # Preserve the stock menu and append a separate saved gun type at Busan.
+    hook(0x30F51, 39, "b891008b56ee")
+    hook(0x30F6E, 40, "8846f9ff46f6")
+    gun_tables = (
+        (0x808, (0x19A08, 0x21207, 0x21500, 0x30FC0, 0x31020)),
+        (0x818, (0xB0CB, 0x21233, 0x21529)),
+        (0x828, (0x14448, 0x22214)),
+        (0x838, (0x1447E, 0x2221A)),
+        (0x848, (0x31003,)),
+    )
+    for index, (original, sites) in enumerate(gun_tables):
+        for site in sites:
+            change(b, site, word(original), word(0xFC90 + 18 * index))
+    # Widen gun-type reads (including fleet info, transfer, and battle)
+    # and clear all four bits when replacing a ship's guns.
+    for site in (
+        0xB0C6,
+        0x1443C,
+        0x21202,
+        0x21226,
+        0x2122E,
+        0x214FB,
+        0x2151C,
+        0x21524,
+        0x2220F,
+        0x300D4,
+        0x30F98,
+        0x3107B,
+    ):
+        change(b, site, b"\x07", b"\x0f")
+    for site in (0x300C9, 0x31092):
+        change(b, site, b"\xf8", b"\xf0")
 
     # Relocation locations and the original startup segments move with the
     # native image. The extension targets above remain relative to segment 0.

@@ -10,7 +10,7 @@ export function Splash({ onStart }: { onStart: () => void }) {
         <div class="corner corner-bl" />
         <div class="corner corner-br" />
         <button type="button" class="menu__item" onClick={onStart}>
-          대항해시대2 짱짱맨 실행 <span class="italic">v1.5</span>
+          대항해시대2 짱짱맨 실행 <span class="italic">v1.6</span>
         </button>
       </div>
     </div>

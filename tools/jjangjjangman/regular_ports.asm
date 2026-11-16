@@ -45,6 +45,8 @@ jmp near sell_index
 jmp near yard_hull
 jmp near figure_price
 jmp near figure_row
+jmp near gun_menu
+jmp near selected_gun
 
 regular:
  push ax
@@ -134,6 +136,10 @@ restore:
  popf
  ret
 init_ports:
+ mov si,0xa00
+ mov di,0xfc90
+ mov cx,99 ; five 9-word gun tables and the terminated name
+ cs rep movsb
  mov si,0x900
  mov di,0xfd00
  mov cx,256
@@ -351,12 +357,12 @@ locate:
  retf
 
 ; The C runtime has already based the DOS arenas on the original SP.
-; Keep the catalog at FD00 and the port records and WALK.KEY at FE00
-; above the downward-growing native stack.
+; The stack grows below the gun tables at FC90, ship catalog at FD00,
+; and port records at FE00.
 boot:
  pop ax
  pop dx
- mov sp,0xfd00
+ mov sp,0xfc90
  push ss
  pop ds
  push word [0xbd5b]
@@ -492,3 +498,19 @@ figure_row:
  jne .done
  mov ax,11
 .done: retf
+
+gun_menu:
+ mov dx,[bp-0x12]
+ cmp byte [0xc3a],131
+ jne .done
+ mov bx,dx
+ shl bx,1
+ mov word [bx+0x574],8
+ inc dx
+.done: mov ax,0x91
+ retf
+selected_gun:
+ mov [bp-7],al
+ xor ah,ah
+ mov [bp-0xa],ax
+ retf

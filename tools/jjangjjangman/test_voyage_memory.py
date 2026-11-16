@@ -10,6 +10,7 @@ from unicorn.x86_const import (
     UC_X86_REG_AX,
     UC_X86_REG_DX,
     UC_X86_REG_BX,
+    UC_X86_REG_BP,
     UC_X86_REG_CS,
     UC_X86_REG_DS,
     UC_X86_REG_SS,
@@ -72,6 +73,25 @@ class VoyageMemory(unittest.TestCase):
         for figure in (1, 9, 10, 11):
             cpu.mem_write(ds * 16 + 0x5210 + 29, bytes([figure]))
             self.assertEqual(native_hook(0x1E8BA), min(figure, 10))
+
+        # Run the original battle initialization and range/power loop with
+        # identical ships. Byte firepower at each distance must not wrap.
+        def battle_profile(gun):
+            frame, unit, ship = 0xB000, 0xB100, 0xB200
+            cpu.mem_write(ds * 16 + unit + 2, struct.pack("<H", ship))
+            cpu.mem_write(ds * 16 + ship + 8, bytes([0x10 | gun]))
+            cpu.reg_write(UC_X86_REG_CS, native)
+            cpu.reg_write(UC_X86_REG_BP, frame)
+            cpu.reg_write(UC_X86_REG_AX, unit)
+            for start, stop in ((0x14340, 0x14396), (0x14435, 0x1448E)):
+                cpu.emu_start(
+                    native * 16 + start - HEADER, native * 16 + stop - HEADER, count=300
+                )
+            return list(cpu.mem_read(ds * 16 + unit + 0x10, 6))
+
+        self.assertEqual(battle_profile(0), [0, 0, 0, 0, 0, 0])
+        self.assertEqual(battle_profile(7), [0, 200, 180, 160, 140, 5])
+        self.assertEqual(battle_profile(8), [0, 250, 225, 200, 175, 5])
         values = bytes(range(111))
         cpu.mem_write(ds * 16 + econ, values)
         # The game may consume this entire native stack area for route queues.
