@@ -15,19 +15,19 @@ ja done
 poll:
 ; DOS reads one byte from the emulator’s in-memory WALK.KEY.
 ; An absent file or neutral input preserves a queued key tap.
-mov dx,0xc700
+mov dx,0xfeb0
 mov ax,0x3d00
 int 0x21
 jc done
 mov bx,ax
-mov dx,0xc709
+mov dx,0xfeb9
 mov cx,1
 mov ah,0x3f
 int 0x21
 jc close_file
 cmp ax,1
 jne close_file
-mov al,[0xc709]
+mov al,[0xfeb9]
 test al,al
 jz close_file
 mov [bp-1],al
@@ -46,10 +46,10 @@ test di,di
 jz timer_done
 push cx
 shl ax,1
-add al,[0xc70a]
+add al,[0xfeba]
 mov cl,3
 div cl
-mov [0xc70a],ah
+mov [0xfeba],ah
 xor ah,ah
 pop cx
 timer_done:

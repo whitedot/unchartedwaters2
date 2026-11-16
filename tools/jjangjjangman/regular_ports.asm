@@ -1,9 +1,10 @@
 ; nasm -f bin regular_ports.asm -o regular_ports.bin
 bits 16
-org 0xd400
-%define econ 0xd270
-%define defaults 0xd300
-%define ports 0xc800
+org 0
+%define econ 0xfe40
+%define defaults 0x500
+%define extra 0xfe00
+%define ports (extra-130*20)
 %define padding (0x5f54+18)
 jmp near regular
 jmp near entrance
@@ -18,6 +19,18 @@ jmp near save_game
 jmp near national_totals
 jmp near region_totals
 jmp near region_list
+jmp near get_port_far
+jmp near script_port
+jmp near known_ports
+jmp near coordinate_ports
+jmp near chart_ports
+jmp near lookout_ports
+jmp near name_ports
+jmp near locate
+jmp near boot
+jmp near new_hook
+jmp near load_hook
+jmp near save_hook
 
 regular:
  push ax
@@ -106,16 +119,38 @@ restore:
  popa
  popf
  ret
+init_ports:
+ mov si,defaults+111
+ mov di,extra
+ mov cx,60
+ cs rep movsb
+ mov di,0xfeb0
+ mov cx,11
+ cs rep movsb
+ mov di,extra+19
+ mov si,padding
+ mov cx,3
+.flags:
+ mov al,[si]
+ and al,0x50
+ or al,0x16
+ stosb
+ add di,19
+ add si,20
+ loop .flags
+ ret
 new_game:
  preserve
+ call init_ports
 .init:
  mov si,defaults
  mov di,econ
  mov cx,111
- rep movsb
+ cs rep movsb
  jmp restore
 load_game:
  preserve
+ call init_ports
  cmp byte [padding+118*20],'K'
  jne .legacy
  cmp byte [padding+119*20],'4'
@@ -145,6 +180,16 @@ load_game:
  jmp new_game.init
 save_game:
  preserve
+ mov si,extra+19
+ mov di,padding
+ mov cx,3
+.legacy_flags:
+ mov al,[si]
+ and al,0x50
+ stosb
+ add di,19
+ add si,20
+ loop .legacy_flags
  mov byte [padding+118*20],'K'
  mov byte [padding+119*20],'4'
  mov si,econ
@@ -187,4 +232,117 @@ region_totals:
 region_list:
  advance_tables
  inc byte [bp-1]
+ retf
+
+get_port_far:
+ call get_port
+ retf
+script_port:
+ mov al,[bp-1]
+ call get_port
+ mov si,ax
+ retf
+get_port:
+ mov ah,20
+ mul ah
+ cmp ax,130*20
+ jb .original
+ cmp ax,133*20
+ jae .original
+ add ax,ports
+ ret
+.original:
+ add ax,0x5f54
+ ret
+
+; The far call replaces CMP + a short conditional branch. On a taken
+; branch, advance the return IP from the byte after CALL to its target.
+%macro branch_taken 1
+ push bp
+ mov bp,sp
+ add word [bp+2],%1
+ pop bp
+ retf
+%endmacro
+known_ports:
+ cmp si,130
+ jne .test
+ mov word [bp-2],extra
+.test: cmp si,133
+ jge .end
+ branch_taken (0x181d3-0x181ef)
+.end: retf
+
+%macro scan_ports 3
+%1:
+ cmp di,130
+ jne %%test
+ mov si,extra
+%%test: cmp di,133
+ jl %%next
+ branch_taken (%3-(%2+5))
+%%next: retf
+%endmacro
+scan_ports coordinate_ports,0x208ea,0x20909
+scan_ports chart_ports,0x24b54,0x24bbc
+scan_ports lookout_ports,0x35bd3,0x35c31
+name_ports:
+ inc byte [bp-1]
+ add si,20
+ cmp byte [bp-1],130
+ jne .end
+ mov si,extra
+.end: retf
+
+locate:
+ push bx
+ push cx
+ push si
+ xor bx,bx
+ mov cx,133
+ mov si,0x5f54
+.next:
+ cmp [si],ax
+ jne .skip
+ cmp [si+2],dx
+ je .found
+.skip:
+ add si,20
+ inc bx
+ cmp bx,130
+ jne .advance
+ mov si,extra
+.advance: loop .next
+ mov bx,-1
+.found: mov ax,bx
+ pop si
+ pop cx
+ pop bx
+ retf
+
+; The C runtime has already based the DOS arenas on the original SP.
+; Before main, reserve the top 0x100 bytes for the three mutable records,
+; their economies and WALK.KEY. The native stack only grows below FE00.
+boot:
+ pop ax
+ pop dx
+ mov sp,extra
+ push ss
+ pop ds
+ push word [0xbd5b]
+ push dx
+ push ax
+ retf
+new_hook:
+ call new_game
+ lea bx,[0x092c]
+ retf
+load_hook:
+ call load_game
+ test byte [0xc30],0x42
+ retf
+save_hook:
+ call save_game
+ mov ax,0x8b6c
+ sub ax,0x0c30
  retf

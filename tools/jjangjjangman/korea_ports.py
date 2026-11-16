@@ -12,7 +12,6 @@ PORTS = (("인천", 934, 378), ("부산", 952, 386), ("서울", 944, 374))
 # Two large tiles across at the bend; the fleet occupies four small tiles.
 RIVER = [(x, 376) for x in range(932, 946, 2)] + [(940, 374), (942, 374)]
 ORIGINAL_TABLE = 0x5F54
-PORT_TABLE = 0xC800
 PORT_SIZE = 20
 DS = 0x355B
 HEADER = 0x5400
@@ -30,46 +29,54 @@ def change(buf, at, old, new):
 
 def executable(source, profiles):
     b = bytearray(source)
-    # The Korean program clears BSS through DS:C6FF. Place the extension
-    # directly above it, below the downward-growing stack. Keep the original
-    # stack top: the DOS allocator derives its graphics arena from that value.
-    for p in (0xAF9A, 0x36AEA):
-        change(b, p, word(ORIGINAL_TABLE), word(PORT_TABLE))
-    # Known ports, coordinate lookup, chart inspection, lookout, duplicate names.
-    for p in (0x181EC, 0x208EC, 0x24B56, 0x35BD5, 0x2D36C):
-        change(b, p, b"\x82", b"\x85")
-    # The map renderer's hash index is authored for the old coordinates.
-    # Use the same register contract as its original far routine (AX=x, DX=y).
-    lookup = (
-        bytes.fromhex("53 51 56 be")
-        + word(PORT_TABLE)
-        + bytes.fromhex(
-            "31 db b9 85 00 39 04 75 05 39 54 02 74 0b 83 c6 14 43 e2 f1 "
-            "b8 ff ff eb 02 89 d8 5e 59 5b cb"
-        )
+    runtime = Path(__file__).with_name("regular_ports.bin").read_bytes()
+    assert len(runtime) <= 0x500
+    # Give the extension its own DOS load segment BEFORE the native image.
+    # Native near pointers and offsets stay unchanged (including SS == DS).
+    towns = b"".join(
+        struct.pack("<HH15sB", x, y, name.encode("cp949"), 0x16) for name, x, y in PORTS
     )
-    change(b, 0x277F2, source[0x277F2 : 0x277F2 + len(lookup)], lookup)
+    prefix = runtime.ljust(0x500, b"\0") + profiles + towns + b"WALK.KEY\0\0\0"
+    prefix += bytes(-len(prefix) % 16)
+    delta = len(prefix) // 16
+    relocated = []
+    count = struct.unpack_from("<H", b, 6)[0]
+    removed = 0
+    for i in range(count):
+        off, seg = struct.unpack_from("<HH", b, 0x1E + 4 * i)
+        site = HEADER + 16 * seg + off
+        if 0x20736 <= site < 0x2079A:
+            removed += 1
+            continue
+        target = struct.unpack_from("<H", b, site)[0]
+        struct.pack_into("<H", b, site, target + delta)
+        relocated.append((off, seg + delta))
+    assert removed == 6
 
-    db = HEADER + DS * 16
-    b.extend(bytes(db + PORT_TABLE + 133 * PORT_SIZE - len(b)))
-    # Replace the disabled mouse-motion reader in the port walking loop.
-    # Its six far calls no longer exist, so the DOS loader must not relocate
-    # their former segment words inside the new instructions.
+    def hook(site, slot, original, jump=False):
+        old = bytes.fromhex(original)
+        far = bytes([0xEA if jump else 0x9A]) + word(slot * 3) + word(0)
+        change(b, site, old, far.ljust(len(old), b"\x90"))
+        offset = site + 3 - HEADER
+        relocated.append((offset % 16, offset // 16 + delta))
+
+    hook(0x879E, 21, "161fff365bbd")
+    hook(0x1BEDB, 22, "8d1e2c0990")
+    hook(0x1B944, 23, "f606300c42")
+    hook(0x1BB53, 24, "b86c8b2d300c")
+    hook(0xAF90, 13, "558bec50b014f666fe05545f8be55dcb", jump=True)
+    hook(0x36AE1, 14, "b014f666ff8bf081c6545f")
+    hook(0x181EA, 15, "81fe82007ce3")
+    hook(0x208EA, 16, "81ff82007d19")
+    hook(0x24B54, 17, "81ff82007d62")
+    hook(0x35BD3, 18, "81ff82007d58")
+    hook(0x2D38B, 19, "fe46ff83c614")
+    change(b, 0x2D36C, bytes([130]), bytes([133]))
+    hook(0x277F2, 20, "558bec83ec02", jump=True)
+
     start, end = 0x20736, 0x2079A
     walk = Path(__file__).with_name("town_walk.bin").read_bytes()
     change(b, start, source[start:end], walk)
-    count = struct.unpack_from("<H", b, 6)[0]
-    entries = [b[0x1E + i * 4 : 0x22 + i * 4] for i in range(count)]
-    kept = []
-    for entry in entries:
-        off, segment = struct.unpack("<HH", entry)
-        if not start <= HEADER + segment * 16 + off < end:
-            kept.append(entry)
-    assert count - len(kept) == 6
-    b[0x1E : 0x1E + 4 * count] = b"".join(kept) + bytes(24)
-    struct.pack_into("<H", b, 6, len(kept))
-    b[db + 0xC700 : db + 0xC709] = b"WALK.KEY\0"
-    # Near call to the timer at offset 0x47 in town_walk.asm.
     change(
         b,
         0x207E5,
@@ -79,43 +86,6 @@ def executable(source, profiles):
         + struct.pack("<h", start + 0x47 - 0x207F2)
         + b"\x90",
     )
-    for i, (name, x, y) in enumerate(PORTS, 130):
-        off = db + PORT_TABLE + i * PORT_SIZE
-        b[off : off + 20] = struct.pack("<HH15sB", x, y, name.encode("cp949"), 0x16)
-
-    # Mirror the original 130 records at native load/save boundaries. Store
-    # only the three new discovery flags, in unused name padding of the first
-    # three ports (well past their Korean names' terminating NUL).
-    def synchronize(load):
-        src, dst = (
-            (ORIGINAL_TABLE, PORT_TABLE) if load else (PORT_TABLE, ORIGINAL_TABLE)
-        )
-        code = bytearray.fromhex("9c 50 51 56 57 06 1e 07 fc be")
-        code += word(src) + b"\xbf" + word(dst) + bytes.fromhex("b9 14 05 f3 a5")
-        for i in range(3):
-            padding = ORIGINAL_TABLE + i * 20 + 18
-            flags = PORT_TABLE + (130 + i) * 20 + 19
-            code += b"\xa0" + word(padding if load else flags) + bytes.fromhex("24 50")
-            if load:
-                code += bytes.fromhex("0c 16")
-            code += b"\xa2" + word(flags if load else padding)
-        return code + bytes.fromhex("07 5f 5e 59 58 9d")
-
-    # Additional native entry points run in the existing data segment.
-    runtime = Path(__file__).with_name("regular_ports.bin").read_bytes()
-    b.extend(bytes(db + 0xD400 - len(b)) + runtime)
-    b[db + 0xD300 : db + 0xD300 + 111] = profiles
-
-    def hook(site, slot, original, jump=False):
-        old = bytes.fromhex(original)
-        far = bytes([0xEA if jump else 0x9A]) + word(0xD400 + slot * 3) + word(DS)
-        change(b, site, old, far.ljust(len(old), b"\x90"))
-        count = struct.unpack_from("<H", b, 6)[0]
-        rel = site + 3 - HEADER
-        assert 0x1E + 4 * (count + 1) <= HEADER
-        struct.pack_into("<HH", b, 0x1E + 4 * count, rel % 16, rel // 16)
-        struct.pack_into("<H", b, 6, count + 1)
-
     for site in (0xB875, 0xDA3C, 0xDA9E, 0xDB54, 0x2017B, 0x20B88):
         hook(site, 0, "803e3a0c64")
     hook(0xDB1B, 1, "3c647602b064")
@@ -132,34 +102,16 @@ def executable(source, profiles):
     change(b, 0x2ECD2, bytes([99]), bytes([102]))
     change(b, 0x2ECEB, bytes([100]), bytes([103]))
 
-    # Each stub replays the displaced instructions before returning.
-    # The load hook replaces a TEST, so its condition flags must reach the caller.
-    for site, addr, load, original in (
-        (0x1BEDB, 0xC710, True, "8d1e2c0990"),
-        (0x1B944, 0xC760, True, "f606300c42"),
-        (0x1BB53, 0xC7B0, False, "b86c8b2d300c"),
-    ):
-        original = bytes.fromhex(original)
-        routine = synchronize(load)
-        target = 0xD400 + 3 * {0xC710: 7, 0xC760: 8, 0xC7B0: 9}[addr]
-        routine += b"\xe8" + struct.pack("<h", target - (addr + len(routine) + 3))
-        routine += original + b"\xcb"
-        assert len(routine) <= 0x50
-        b[db + addr : db + addr + len(routine)] = routine
-        change(
-            b,
-            site,
-            original,
-            b"\x9a" + word(addr) + word(DS) + b"\x90" * (len(original) - 5),
-        )
-        count = struct.unpack_from("<H", b, 6)[0]
-        relocation = site + 3 - HEADER
-        struct.pack_into("<HH", b, 0x1E + count * 4, relocation % 16, relocation // 16)
-        struct.pack_into("<H", b, 6, count + 1)
+    # Relocation locations and the original startup segments move with the
+    # native image. The extension targets above remain relative to segment 0.
+    assert 0x1E + 4 * len(relocated) <= HEADER
+    for i, (off, seg) in enumerate(relocated):
+        struct.pack_into("<HH", b, 0x1E + 4 * i, off, seg)
+    struct.pack_into("<H", b, 6, len(relocated))
+    for field in (0x0E, 0x16):  # initial SS, CS
+        struct.pack_into("<H", b, field, struct.unpack_from("<H", b, field)[0] + delta)
+    b[HEADER:HEADER] = prefix
     struct.pack_into("<HH", b, 2, len(b) % 512, (len(b) + 511) // 512)
-    growth = (len(b) + 15) // 16 - (len(source) + 15) // 16
-    minimum = struct.unpack_from("<H", source, 10)[0]
-    struct.pack_into("<H", b, 10, minimum - growth)
     return b
 
 
