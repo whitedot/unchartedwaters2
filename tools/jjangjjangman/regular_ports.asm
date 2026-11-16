@@ -47,6 +47,7 @@ jmp near figure_price
 jmp near figure_row
 jmp near gun_menu
 jmp near selected_gun
+jmp near fleet_day
 
 regular:
  push ax
@@ -513,4 +514,37 @@ selected_gun:
  mov [bp-7],al
  xor ah,ah
  mov [bp-0xa],ax
+ retf
+
+; The day loop tracks the current zero-based day in DS:0570. When day
+; 10 or 20 ends, run only the four native fleet maintenance routines.
+; The existing month boundary handles the third pass and the economy.
+fleet_day:
+ mov byte [0xc39],0
+ cmp byte [0x570],9
+ je .rebuild
+ cmp byte [0x570],19
+ jne .done
+.rebuild:
+ push bp
+ mov bp,sp
+ pusha
+ ; These routines share the caller's native code segment. The saved IP
+ ; points to file offset 1E4B8, immediately following the patched call.
+%macro fleet_call 1
+ mov ax,[bp+2]
+ add ax,%1-0x1e4b8
+ push cs
+ call .enter_native
+%endmacro
+ fleet_call 0x1d07f ; merchant fleets
+ fleet_call 0x1d173 ; convoys
+ fleet_call 0x1d268 ; voyaging fleets
+ fleet_call 0x1d71e ; appoint captains and relaunch
+ popa
+ pop bp
+.done: retf
+.enter_native:
+ push word [bp+4]
+ push ax
  retf

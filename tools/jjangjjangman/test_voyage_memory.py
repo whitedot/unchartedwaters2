@@ -17,7 +17,7 @@ from unicorn.x86_const import (
     UC_X86_REG_SP,
     UC_X86_REG_IP,
 )
-from korea_ports import HEADER, DS
+from korea_ports import HEADER, DS, archive_entry
 
 
 class VoyageMemory(unittest.TestCase):
@@ -113,6 +113,26 @@ class VoyageMemory(unittest.TestCase):
             self.assertEqual(
                 cpu.mem_read(ds * 16 + port + 20 * i + 19, 1), bytes([0x50 + i])
             )
+
+        # A defeated merchant fleet in a real starting world must receive
+        # ships on both extra maintenance days, but not on intervening days.
+        with ZipFile(archive) as z:
+            world = archive_entry(z.read("DATA1.LZW"), 15)
+        cpu.mem_write(ds * 16 + 0xC30, bytes(world))
+        fleet = ds * 16 + 0x2DB2 + 133
+        slots = fleet + 0x2B
+        for day in (8, 9, 10, 18, 19, 20):
+            cpu.mem_write(fleet + 0x29, b"\0")
+            cpu.mem_write(slots, bytes(90))
+            cpu.mem_write(ds * 16 + 0x570, bytes([day]))
+            cpu.reg_write(UC_X86_REG_CS, native + 0xFB7)
+            cpu.reg_write(UC_X86_REG_SP, 0xFB00)
+            start = native * 16 + 0x1E4B3 - HEADER
+            cpu.emu_start(start, start + 5, count=3000000)
+            self.assertEqual(cpu.reg_read(UC_X86_REG_SP), 0xFB00)
+            self.assertEqual(cpu.reg_read(UC_X86_REG_IP), 0x1E4B8 - HEADER - 0xFB70)
+            ships = cpu.mem_read(slots, 90)[8::9]
+            self.assertEqual(any(status & 0x10 for status in ships), day in (9, 19))
 
 
 if __name__ == "__main__":

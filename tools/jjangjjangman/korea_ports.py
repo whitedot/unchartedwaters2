@@ -245,6 +245,19 @@ def executable(source, profiles, catalog):
     for site in (0x300C9, 0x31092):
         change(b, site, b"\xf8", b"\xf0")
 
+    # The stock class guard counts even defeated fleets as being at sea.
+    # Let all existing NPC slots depart when their normal objective calls.
+    change(b, 0x383B0, bytes.fromhex("558bec"), bytes.fromhex("31c0cb"))
+    hook(0x1E4B3, 41, "c606390c00")
+    # Shorter waits keep existing fleets sailing between rebuilds.
+    for site, old, new in (
+        (0x1EF60, 8, 3),
+        (0x1EF68, 8, 3),
+        (0x1D5A2, 10, 4),
+        (0x1D5AA, 5, 2),
+    ):
+        change(b, site, bytes([old]), bytes([new]))
+
     # Relocation locations and the original startup segments move with the
     # native image. The extension targets above remain relative to segment 0.
     assert 0x1E + 4 * len(relocated) <= HEADER

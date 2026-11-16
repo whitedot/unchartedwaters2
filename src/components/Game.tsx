@@ -224,7 +224,7 @@ export function Game() {
     });
     blockAddEventListener(document, ["keydown", "keyup", "keypress"]);
     const { fs, main } = await createDos(canvas.current!);
-    await fs.extract("/static/game/mod_jjangjjangman.zip?v=1.6");
+    await fs.extract("/static/game/mod_jjangjjangman.zip?v=1.7");
     writeWalkKey.current = digit => fs.fs.writeFile("WALK.KEY", Uint8Array.of(digit.charCodeAt(0) || 0));
     writeWalkKey.current("");
     if (saveFileBody) {
