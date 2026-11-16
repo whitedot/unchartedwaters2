@@ -52,6 +52,26 @@ def executable(source):
 
     db = HEADER + DS * 16
     b.extend(bytes(db + PORT_TABLE + 133 * PORT_SIZE - len(b)))
+    # Replace the disabled mouse-motion reader in the port walking loop.
+    # Its six far calls no longer exist, so the DOS loader must not relocate
+    # their former segment words inside the new instructions.
+    start, end = 0x20736, 0x2079A
+    walk = Path(__file__).with_name("town_walk.bin").read_bytes()
+    change(b, start, source[start:end], walk)
+    count = struct.unpack_from("<H", b, 6)[0]
+    entries = [b[0x1E + i * 4 : 0x22 + i * 4] for i in range(count)]
+    kept = []
+    for entry in entries:
+        off, segment = struct.unpack("<HH", entry)
+        if not start <= HEADER + segment * 16 + off < end:
+            kept.append(entry)
+    assert count - len(kept) == 6
+    b[0x1E : 0x1E + 4 * count] = b"".join(kept) + bytes(24)
+    struct.pack_into("<H", b, 6, len(kept))
+    b[db + 0xC700 : db + 0xC709] = b"WALK.KEY\0"
+    # Near call to the timer at offset 0x48 in town_walk.asm.
+    change(b, 0x207E5, bytes.fromhex("a0300c24013c011bc024fc050800"),
+           b"\xe8" + struct.pack("<h", start + 0x48 - 0x207E8) + b"\x90" * 11)
     for i, (name, x, y) in enumerate(PORTS, 130):
         off = db + PORT_TABLE + i * PORT_SIZE
         b[off : off + 20] = struct.pack("<HH15sB", x, y, name.encode("cp949"), 0x16)

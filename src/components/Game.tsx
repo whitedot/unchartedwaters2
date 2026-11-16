@@ -62,6 +62,12 @@ function blockGameMouse(event: MouseEvent) {
   event.stopPropagation();
 }
 
+// Towns accept cardinal keypad digits. Diagonal keypad shortcuts use their
+// vertical component, while overlapping arrow keys use the most recent press.
+const townKeys: Record<number, string> = {
+  97: "2", 98: "2", 99: "2", 100: "4", 102: "6", 103: "8", 104: "8", 105: "8",
+};
+
 const saveFile = "KOUKAI2.DAT";
 
 export function Game() {
@@ -72,6 +78,8 @@ export function Game() {
   const joystickCodeBefore = useRef<number | null>(null);
 
   const [error, setError] = useState("");
+  const walkKeys = useRef(new Map<string | number, string>());
+  const writeWalkKey = useRef<(digit: string) => void>(() => {});
   const heldArrows = useRef(new Set<string>());
   const [enabledToggleFullscreen, setEnabledToggleFullscreen] = useState(false);
   const [enabledToggleKeyboard, setEnabledToggleKeyboard] = useState(
@@ -124,30 +132,46 @@ export function Game() {
     setEnabledToggleFullscreen(!!window.document.fullscreenElement);
   }, []);
 
-  const handleKeyDown = useCallback((code: number) => {
-    const event = createKeyboardEvent("keydown", code);
-    keydownHandlers.current.forEach((handler) => handler(event));
+  const trackWalkKey = useCallback((id: string | number, code: number, down: boolean) => {
+    const digit = townKeys[code];
+    if (!digit) return;
+    const held = walkKeys.current;
+    if (down === held.has(id)) return;
+    if (down) held.set(id, digit);
+    else held.delete(id);
+    const digits = Array.from(held.values());
+    writeWalkKey.current(digits[digits.length - 1] || "");
   }, []);
 
-  const handleKeyUp = useCallback((code: number) => {
+  const handleKeyDown = useCallback((code: number, track = true) => {
+    if (track) trackWalkKey(code, code, true);
+    const event = createKeyboardEvent("keydown", code);
+    keydownHandlers.current.forEach((handler) => handler(event));
+  }, [trackWalkKey]);
+
+  const handleKeyUp = useCallback((code: number, track = true) => {
+    if (track) trackWalkKey(code, code, false);
     const event = createKeyboardEvent("keyup", code);
     keyupHandlers.current.forEach((handler) => handler(event));
-  }, []);
+  }, [trackWalkKey]);
 
   const updateArrow = useCallback((code: string, down: boolean) => {
     const held = heldArrows.current;
+    trackWalkKey(code, KEY_ALIAS[code], down);
     const previous = arrowKeypadCode(held);
     if (down) held.add(code);
     else held.delete(code);
     const next = arrowKeypadCode(held);
     if (next === previous) return;
-    if (previous) handleKeyUp(previous);
-    if (next) handleKeyDown(next);
-  }, [handleKeyDown, handleKeyUp]);
+    if (previous) handleKeyUp(previous, false);
+    if (next) handleKeyDown(next, false);
+  }, [handleKeyDown, handleKeyUp, trackWalkKey]);
 
   const releaseArrows = useCallback(() => {
     const code = arrowKeypadCode(heldArrows.current);
     heldArrows.current.clear();
+    walkKeys.current.clear();
+    writeWalkKey.current("");
     if (code) handleKeyUp(code);
   }, [handleKeyUp]);
 
@@ -200,7 +224,9 @@ export function Game() {
     });
     blockAddEventListener(document, ["keydown", "keyup", "keypress"]);
     const { fs, main } = await createDos(canvas.current!);
-    await fs.extract("/static/game/mod_jjangjjangman.zip?v=1.1");
+    await fs.extract("/static/game/mod_jjangjjangman.zip?v=1.2");
+    writeWalkKey.current = digit => fs.fs.writeFile("WALK.KEY", Uint8Array.of(digit.charCodeAt(0) || 0));
+    writeWalkKey.current("");
     if (saveFileBody) {
       // Overwrite Save File
       (fs as any).fs.writeFile(saveFile, saveFileBody); // eslint-disable-line @typescript-eslint/no-explicit-any
